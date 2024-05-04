@@ -537,13 +537,13 @@ it("When visiting TestJavaScript.com home page, a menu is displayed", () => {
 
 <br/><br/>
 
-## ⚪ ️1.9 避免使用全域的 test fixtures 或 seeds，而是放進每個測試中
+## ⚪ ️1.9 複製代碼，但只複製必要部分
 
-:white_check_mark: **建議：** 參照黃金原則，每個測試需要在它自己的 DB 中進行操作避免互相污染。但現實中，這條規則經常被打破：為了性能的提升而在執行測試前初始化全域資料庫 (也被稱為"[test fixture](https://en.wikipedia.org/wiki/Test_fixture)")。儘管性能很重要，但是它可以通過後面講的「組件測試」來做取捨。為了減輕複雜度，我們可以在每個測試中只初始化自己需要的數據。除非性能問題真的非常嚴重，那還是可以做一定程度的妥協 - 僅在全域放不會改變的數據 (比如 query)。
+:white_check_mark: **建議：** 確保包含影響測試結果的所有必要細節，但不要多加。比如，考慮一個需要處理 100 行 JSON 輸入的例子——在每個例子都貼一份是很繁瑣的。將其提取到 `transferFactory.getJSON()` 中會使得這個例子變得模糊——沒有數據，就很難將測試結果與原因聯繫起來（“為什麼會返回 400 狀態碼”）。經典書籍 x-unit patterns 將這種模式稱為“神秘的客人”——有些看不到的東西影響了我們的測試結果，我們不清楚是什麼。更好的做法是把重複冗長的部分提取出來，並明確指出對例子重要的具體細節。以上面的例子為例，例子可以通過傳入的參數來突出重要細節：`transferFactory.getJSON({ sender: undefined })`。在這個例子中，讀者可以立即推斷出，變量 `sender` 為 `undefined` 是導致例子預期驗證錯誤或任何類似合理結果的原因。
 
 <br/>
 
-❌ **否則：** 有一些測試 fail 了，團隊花了許多時間後發現，只是因為兩個測試同時改變了同一個 seed。
+❌ **否則：** 直接複製 500 行 JSON 文本會使得測試難以維護和閱讀。而將所有內容提取出去，會使得這個例子難以理解。
 
 <br/>
 
@@ -551,43 +551,40 @@ it("When visiting TestJavaScript.com home page, a menu is displayed", () => {
 
 <br/>
 
-### :thumbsdown: 反例：測試案例之間不是獨立的。而是相依於全域的 DB 資料
+### :thumbsdown: 反例：例子失敗原因不明確，因為所有原因都是外部的，並隱藏在大量的 JSON 文本裡
 
 ![](https://img.shields.io/badge/🔧%20Example%20using%20Mocha-blue.svg "Examples with Mocha")
 
 ```javascript
-before(async () => {
-  // adding sites and admins data to our DB. Where is the data? outside. At some external json or migration framework
-  await DB.AddSeedDataFromJson('seed.json');
-});
-it("When updating site name, get successful confirmation", async () => {
-  // I know that site name "portal" exists - I saw it in the seed files
-  const siteToUpdate = await SiteService.getSiteByName("Portal");
-  const updateNameResult = await SiteService.changeName(siteToUpdate, "newName");
-  expect(updateNameResult).to.be(true);
-});
-it("When querying by site name, get the right site", async () => {
-  // I know that site name "portal" exists - I saw it in the seed files
-  const siteToCheck = await SiteService.getSiteByName("Portal");
-  expect(siteToCheck.name).to.be.equal("Portal"); // Failure! The previous test change the name :[
-});
+test("When no credit, then the transfer is declined", async() => {
+      // Arrange
+      const transferRequest = testHelpers.factorMoneyTransfer() //get back 200 lines of JSON;
+      const transferServiceUnderTest = new TransferService();
 
+      // Act
+      const transferResponse = await transferServiceUnderTest.transfer(transferRequest);
+
+      // Assert
+      expect(transferResponse.status).toBe(409);// But why do we expect failure: All seems perfectly valid in the test 🤔
+});
 ```
 
 <br/>
 
-### :clap: 正例：每個測試案例只操作他自己的資料
+### :clap: 正例：突出每個例子結果的原因
 
 ```javascript
-it("When updating site name, get successful confirmation", async () => {
-  // test is adding a fresh new records and acting on the records only
-  const siteUnderTest = await SiteService.addSite({
-    name: "siteForUpdateTest"
-  });
 
-  const updateNameResult = await SiteService.changeName(siteUnderTest, "newName");
+test("When no credit, then the transfer is declined ", async() => {
+      // Arrange
+      const transferRequest = testHelpers.factorMoneyTransfer({userCredit:100, transferAmount:200}) //obviously there is lack of credit
+      const transferServiceUnderTest = new TransferService({disallowOvercharge:true});
 
-  expect(updateNameResult).to.be(true);
+      // Act
+      const transferResponse = await transferServiceUnderTest.transfer(transferRequest);
+
+      // Assert
+      expect(transferResponse.status).toBe(409); // Obviously if the user has no credit it should fail
 });
 ```
 
